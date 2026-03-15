@@ -4,7 +4,6 @@ import org.opencv.core.*;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.objdetect.CascadeClassifier;
 
-import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.io.File;
@@ -16,21 +15,25 @@ import java.nio.file.StandardCopyOption;
 /**
  * Deteksi wajah menggunakan OpenCV Haar Cascade.
  *
- * Threshold yang diperketat:
- *  - Brightness minimum 80 (dari 60) — foto gelap ditolak
- *  - Face size minimum 80px (dari 100px) — lebih toleran tapi tetap reject blur
- *  - Validasi tanpa OpenCV: TETAP cek brightness manual
+ * LOGIKA VALIDASI YANG BENAR:
+ *  1. Deteksi wajah DULU — kalau tidak ada wajah, langsung tolak
+ *  2. Brightness dicek HANYA di area wajah — bukan seluruh gambar
+ *  3. Ini mencegah:
+ *     - Foto gelap dengan wajah terang → diterima (brightness wajah cukup)
+ *     - Foto terang tanpa wajah → ditolak (tidak ada wajah)
+ *     - Foto dengan tangan/benda menutupi → ditolak (tidak ada wajah)
  */
 public class FaceDetectionUtil {
 
     private static CascadeClassifier faceDetector;
     private static boolean           opencvLoaded = false;
 
-    // ── Threshold — diperketat ────────────────────────────────
-    public static final int    MIN_FACE_WIDTH   = 80;
-    public static final int    MIN_FACE_HEIGHT  = 80;
-    public static final double MIN_BRIGHTNESS   = 80.0;  // dinaikkan dari 60
-    public static final double CENTER_TOLERANCE = 0.35;
+    // ── Threshold ─────────────────────────────────────────────
+    public static final int    MIN_FACE_WIDTH      = 60;   // lebih toleran
+    public static final int    MIN_FACE_HEIGHT     = 60;
+    public static final double MIN_FACE_BRIGHTNESS = 50.0; // brightness WAJAH saja
+    public static final double MIN_IMG_BRIGHTNESS  = 30.0; // brightness gambar (anti pitch-black)
+    public static final double CENTER_TOLERANCE    = 0.40; // lebih toleran posisi
 
     // ── Hasil deteksi ─────────────────────────────────────────
 
@@ -39,40 +42,45 @@ public class FaceDetectionUtil {
         public final String  errorMessage;
         public final int     faceCount;
         public final Rect    faceRect;
-        public final double  brightness;
+        public final double  brightness;      // brightness area wajah
+        public final double  imgBrightness;   // brightness seluruh gambar
 
         public FaceDetectionResult(boolean valid, String errorMessage,
-                                    int faceCount, Rect faceRect,
-                                    double brightness) {
-            this.valid        = valid;
-            this.errorMessage = errorMessage;
-            this.faceCount    = faceCount;
-            this.faceRect     = faceRect;
-            this.brightness   = brightness;
+                int faceCount, Rect faceRect,
+                double brightness, double imgBrightness) {
+            this.valid         = valid;
+            this.errorMessage  = errorMessage;
+            this.faceCount     = faceCount;
+            this.faceRect      = faceRect;
+            this.brightness    = brightness;
+            this.imgBrightness = imgBrightness;
         }
 
-        public static FaceDetectionResult sukses(int fc, Rect r, double b) {
-            return new FaceDetectionResult(true, null, fc, r, b);
+        public static FaceDetectionResult sukses(int fc, Rect r,
+                double faceBright, double imgBright) {
+            return new FaceDetectionResult(true, null, fc, r,
+                faceBright, imgBright);
         }
         public static FaceDetectionResult gagal(String msg) {
-            return new FaceDetectionResult(false, msg, 0, null, 0);
+            return new FaceDetectionResult(false, msg, 0, null, 0, 0);
         }
-        public static FaceDetectionResult gagal(String msg, int fc, double b) {
-            return new FaceDetectionResult(false, msg, fc, null, b);
+        public static FaceDetectionResult gagal(String msg, int fc,
+                double fb, double ib) {
+            return new FaceDetectionResult(false, msg, fc, null, fb, ib);
         }
     }
 
-    // ── Init OpenCV ───────────────────────────────────────────
+    // ── Init ──────────────────────────────────────────────────
 
     public static void init() {
         if (opencvLoaded) return;
         try {
             nu.pattern.OpenCV.loadLocally();
             opencvLoaded = true;
-            String cascadePath = extractCascadeFile();
-            faceDetector = new CascadeClassifier(cascadePath);
+            String path = extractCascade();
+            faceDetector = new CascadeClassifier(path);
             if (faceDetector.empty()) {
-                System.err.println("[FaceDetection] Haar Cascade gagal dimuat.");
+                System.err.println("[FaceDetection] Cascade gagal dimuat.");
                 faceDetector = null;
             } else {
                 System.out.println("[FaceDetection] OpenCV siap.");
@@ -84,7 +92,7 @@ public class FaceDetectionUtil {
         }
     }
 
-    private static String extractCascadeFile() throws Exception {
+    private static String extractCascade() throws Exception {
         String[] paths = {
             "/haarcascades/haarcascade_frontalface_default.xml",
             "/opencv/haarcascade_frontalface_default.xml"
@@ -92,15 +100,15 @@ public class FaceDetectionUtil {
         for (String p : paths) {
             InputStream is = FaceDetectionUtil.class.getResourceAsStream(p);
             if (is != null) {
-                Path tmp = Files.createTempFile("haarcascade_", ".xml");
+                Path tmp = Files.createTempFile("haar_", ".xml");
                 Files.copy(is, tmp, StandardCopyOption.REPLACE_EXISTING);
                 is.close();
                 tmp.toFile().deleteOnExit();
                 return tmp.toString();
             }
         }
-        File local = new File("haarcascade_frontalface_default.xml");
-        if (local.exists()) return local.getAbsolutePath();
+        File f = new File("haarcascade_frontalface_default.xml");
+        if (f.exists()) return f.getAbsolutePath();
         throw new RuntimeException("haarcascade_frontalface_default.xml tidak ditemukan.");
     }
 
@@ -112,173 +120,213 @@ public class FaceDetectionUtil {
 
     public static Mat bufferedImageToMat(BufferedImage image) {
         BufferedImage bgr = new BufferedImage(
-            image.getWidth(), image.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
+            image.getWidth(), image.getHeight(),
+            BufferedImage.TYPE_3BYTE_BGR);
         bgr.getGraphics().drawImage(image, 0, 0, null);
-        byte[] pixels = ((DataBufferByte) bgr.getRaster()
+        byte[] px = ((DataBufferByte) bgr.getRaster()
             .getDataBuffer()).getData();
-        Mat mat = new Mat(image.getHeight(), image.getWidth(), CvType.CV_8UC3);
-        mat.put(0, 0, pixels);
+        Mat mat = new Mat(image.getHeight(), image.getWidth(),
+            CvType.CV_8UC3);
+        mat.put(0, 0, px);
         return mat;
     }
 
-    // ── Validasi REGISTRASI (ketat) ───────────────────────────
+    // ── VALIDASI REGISTRASI ───────────────────────────────────
 
     /**
-     * Validasi foto untuk REGISTRASI:
-     *  1. Brightness >= 80 (wajib terang)
-     *  2. Tepat 1 wajah
-     *  3. Wajah ukuran cukup (tidak terlalu jauh)
-     *  4. Wajah di tengah frame
-     *  5. Wajah tidak terpotong
-     *
-     * Jika OpenCV tidak tersedia: tetap cek brightness manual,
-     * tapi skip deteksi wajah.
+     * Urutan validasi yang BENAR:
+     *  1. Cek gambar tidak pitch-black total
+     *  2. Deteksi wajah — WAJIB ada, kalau tidak ada langsung tolak
+     *  3. Cek brightness AREA WAJAH — bukan seluruh gambar
+     *  4. Cek ukuran wajah
+     *  5. Cek posisi wajah
+     *  6. Cek wajah tidak terpotong
      */
     public static FaceDetectionResult validate(BufferedImage image) {
         if (image == null)
             return FaceDetectionResult.gagal("Gagal mengambil gambar dari kamera.");
 
-        // Cek brightness SELALU — bahkan tanpa OpenCV
-        double brightness = hitungBrightness(image);
-        System.out.printf("[FaceDetection] Brightness: %.1f (min: %.0f)%n",
-            brightness, MIN_BRIGHTNESS);
-
-        if (brightness < MIN_BRIGHTNESS) {
-            return FaceDetectionResult.gagal(
-                "Foto terlalu gelap (brightness: " + (int)brightness + "/255).\n\n" +
-                "Pastikan:\n" +
-                "• Berada di tempat dengan cahaya yang cukup\n" +
-                "• Wajah tidak tertutup bayangan\n" +
-                "• Lampu menyala jika di dalam ruangan",
-                0, brightness);
-        }
-
-        // Jika OpenCV tidak tersedia — hanya lolos brightness check
+        // Tanpa OpenCV — hanya cek brightness gambar total
         if (!isAvailable()) {
-            System.out.println("[FaceDetection] OpenCV tidak tersedia, " +
-                "hanya brightness yang dicek.");
-            return FaceDetectionResult.sukses(1, null, brightness);
+            double ib = hitungBrightnessManual(image);
+            System.out.printf("[FaceDetection] Tanpa OpenCV, brightness: %.1f%n", ib);
+            if (ib < MIN_IMG_BRIGHTNESS) {
+                return FaceDetectionResult.gagal(
+                    "Foto terlalu gelap.\nNyalakan lampu atau pindah ke tempat terang.");
+            }
+            return FaceDetectionResult.sukses(1, null, ib, ib);
         }
 
         Mat mat = bufferedImageToMat(image);
 
-        // Deteksi wajah
+        // Step 1: Cek gambar tidak pitch-black
+        double imgBright = hitungBrightnessRegion(mat, null);
+        System.out.printf("[FaceDetection] Brightness gambar: %.1f%n", imgBright);
+
+        if (imgBright < MIN_IMG_BRIGHTNESS) {
+            mat.release();
+            return FaceDetectionResult.gagal(
+                "Foto terlalu gelap.\n\n" +
+                "Nyalakan lampu atau pindah ke tempat yang lebih terang.",
+                0, 0, imgBright);
+        }
+
+        // Step 2: Deteksi wajah DULU
         Mat gray = new Mat();
         Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
         Imgproc.equalizeHist(gray, gray);
 
         MatOfRect faces = new MatOfRect();
-        faceDetector.detectMultiScale(gray, faces, 1.1, 5, 0,
+        faceDetector.detectMultiScale(
+            gray, faces, 1.1, 4, 0,
             new Size(MIN_FACE_WIDTH, MIN_FACE_HEIGHT), new Size());
 
-        Rect[] faceArr = faces.toArray();
-        int    fc      = faceArr.length;
+        Rect[] arr = faces.toArray();
+        int    fc  = arr.length;
         gray.release();
-        mat.release();
 
         System.out.printf("[FaceDetection] Wajah terdeteksi: %d%n", fc);
 
         if (fc == 0) {
+            mat.release();
             return FaceDetectionResult.gagal(
                 "Wajah tidak terdeteksi.\n\n" +
                 "Pastikan:\n" +
                 "• Wajah menghadap langsung ke kamera\n" +
-                "• Tidak menggunakan masker/penutup wajah\n" +
-                "• Pencahayaan cukup terang\n" +
+                "• Tidak ada yang menutupi wajah (masker, tangan, dll)\n" +
+                "• Pencahayaan cukup — hadap ke sumber cahaya\n" +
                 "• Jarak tidak terlalu jauh dari kamera",
-                0, brightness);
+                0, 0, imgBright);
         }
 
         if (fc > 1) {
+            mat.release();
             return FaceDetectionResult.gagal(
                 "Terdeteksi " + fc + " wajah.\n" +
                 "Pastikan hanya satu orang di depan kamera.",
-                fc, brightness);
+                fc, 0, imgBright);
         }
 
-        Rect face = faceArr[0];
+        Rect face = arr[0];
 
-        // Ukuran wajah — terlalu jauh dari kamera
+        // Step 3: Cek brightness AREA WAJAH saja
+        double faceBright = hitungBrightnessRegion(mat, face);
+        System.out.printf("[FaceDetection] Brightness wajah: %.1f%n", faceBright);
+        mat.release();
+
+        if (faceBright < MIN_FACE_BRIGHTNESS) {
+            return FaceDetectionResult.gagal(
+                "Wajah terlalu gelap.\n\n" +
+                "Wajah terdeteksi tapi kurang cahaya.\n" +
+                "Hadapkan wajah ke sumber cahaya (lampu/jendela).",
+                fc, faceBright, imgBright);
+        }
+
+        // Step 4: Ukuran wajah
         if (face.width < MIN_FACE_WIDTH || face.height < MIN_FACE_HEIGHT) {
             return FaceDetectionResult.gagal(
                 "Wajah terlalu jauh dari kamera.\n" +
-                "Silakan mendekat agar wajah terlihat lebih besar.",
-                fc, brightness);
+                "Silakan mendekat agar wajah lebih besar.",
+                fc, faceBright, imgBright);
         }
 
-        // Posisi — harus di tengah frame
+        // Step 5: Posisi wajah
         String posErr = cekPosisi(face, image.getWidth(), image.getHeight());
         if (posErr != null)
-            return FaceDetectionResult.gagal(posErr, fc, brightness);
+            return FaceDetectionResult.gagal(posErr, fc, faceBright, imgBright);
 
-        // Tidak terpotong
-        if (face.x <= 0 || face.y <= 0
-                || (face.x + face.width)  >= image.getWidth()
-                || (face.y + face.height) >= image.getHeight()) {
+        // Step 6: Tidak terpotong
+        if (face.x <= 2 || face.y <= 2
+                || (face.x + face.width)  >= image.getWidth()  - 2
+                || (face.y + face.height) >= image.getHeight() - 2) {
             return FaceDetectionResult.gagal(
                 "Wajah terpotong di tepi frame.\n" +
-                "Pastikan seluruh wajah terlihat di kamera.",
-                fc, brightness);
+                "Mundur sedikit agar seluruh wajah terlihat.",
+                fc, faceBright, imgBright);
         }
 
-        return FaceDetectionResult.sukses(fc, face, brightness);
+        return FaceDetectionResult.sukses(fc, face, faceBright, imgBright);
     }
 
-    // ── Validasi ABSENSI (brightness + jumlah wajah) ──────────
+    // ── VALIDASI ABSENSI ─────────────────────────────────────
 
     /**
-     * Validasi foto untuk ABSENSI — lebih longgar dari registrasi
-     * tapi tetap wajib:
-     *  1. Brightness >= 80 (wajib terang — foto gelap DITOLAK)
-     *  2. Wajah WAJIB terdeteksi (tidak boleh 0)
-     *  3. Tidak boleh lebih dari 1 wajah
+     * Validasi absensi — prioritas: wajah HARUS ada.
+     *  1. Gambar tidak pitch-black
+     *  2. Deteksi wajah WAJIB
+     *  3. Brightness area wajah cukup
+     *
+     * Tidak cek posisi/ukuran — lebih longgar dari registrasi.
      */
     public static FaceDetectionResult validateAbsensi(BufferedImage image) {
         if (image == null)
             return FaceDetectionResult.gagal("Gagal mengambil gambar.");
 
-        // Brightness selalu dicek
-        double brightness = hitungBrightness(image);
-        System.out.printf("[FaceDetection] Absensi brightness: %.1f%n", brightness);
-
-        if (brightness < MIN_BRIGHTNESS) {
-            return FaceDetectionResult.gagal(
-                "Foto terlalu gelap.\n\n" +
-                "Pastikan berada di tempat yang cukup terang\n" +
-                "sebelum mengambil foto absensi.",
-                0, brightness);
-        }
-
         if (!isAvailable()) {
-            System.out.println("[FaceDetection] OpenCV tidak ada, skip deteksi wajah.");
-            return FaceDetectionResult.sukses(1, null, brightness);
+            double ib = hitungBrightnessManual(image);
+            if (ib < MIN_IMG_BRIGHTNESS)
+                return FaceDetectionResult.gagal(
+                    "Foto terlalu gelap. Pindah ke tempat lebih terang.");
+            return FaceDetectionResult.sukses(1, null, ib, ib);
         }
 
-        Mat mat  = bufferedImageToMat(image);
-        MatOfRect faces = detectFaces(mat);
-        int fc   = faces.toArray().length;
-        mat.release();
+        Mat mat = bufferedImageToMat(image);
+
+        // Cek gambar tidak pitch-black
+        double imgBright = hitungBrightnessRegion(mat, null);
+        if (imgBright < MIN_IMG_BRIGHTNESS) {
+            mat.release();
+            return FaceDetectionResult.gagal(
+                "Foto terlalu gelap.\nNyalakan lampu atau pindah ke tempat terang.",
+                0, 0, imgBright);
+        }
+
+        // Deteksi wajah
+        Mat gray = new Mat();
+        Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
+        Imgproc.equalizeHist(gray, gray);
+        MatOfRect faces = new MatOfRect();
+        faceDetector.detectMultiScale(
+            gray, faces, 1.1, 4, 0,
+            new Size(MIN_FACE_WIDTH, MIN_FACE_HEIGHT), new Size());
+        Rect[] arr = faces.toArray();
+        int    fc  = arr.length;
+        gray.release();
 
         System.out.printf("[FaceDetection] Absensi wajah: %d%n", fc);
 
         if (fc == 0) {
+            mat.release();
             return FaceDetectionResult.gagal(
                 "Wajah tidak terdeteksi.\n\n" +
-                "Pastikan:\n" +
-                "• Wajah menghadap langsung ke kamera\n" +
-                "• Tidak ada yang menutupi wajah\n" +
-                "• Pencahayaan cukup terang",
-                0, brightness);
+                "Pastikan wajah menghadap kamera dan\n" +
+                "tidak ada yang menutupi wajah.",
+                0, 0, imgBright);
         }
 
         if (fc > 1) {
+            mat.release();
             return FaceDetectionResult.gagal(
                 "Terdeteksi lebih dari satu wajah.\n" +
-                "Pastikan hanya Anda yang berada di depan kamera.",
-                fc, brightness);
+                "Pastikan hanya Anda di depan kamera.",
+                fc, 0, imgBright);
         }
 
-        return FaceDetectionResult.sukses(fc, faces.toArray()[0], brightness);
+        // Brightness area wajah
+        double faceBright = hitungBrightnessRegion(mat, arr[0]);
+        mat.release();
+
+        System.out.printf("[FaceDetection] Brightness wajah absensi: %.1f%n",
+            faceBright);
+
+        if (faceBright < MIN_FACE_BRIGHTNESS) {
+            return FaceDetectionResult.gagal(
+                "Wajah kurang terang.\n" +
+                "Hadapkan wajah ke sumber cahaya.",
+                fc, faceBright, imgBright);
+        }
+
+        return FaceDetectionResult.sukses(fc, arr[0], faceBright, imgBright);
     }
 
     // ── Deteksi wajah saja (untuk FaceRecognitionUtil) ────────
@@ -289,44 +337,56 @@ public class FaceDetectionUtil {
         Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
         Imgproc.equalizeHist(gray, gray);
         MatOfRect faces = new MatOfRect();
-        faceDetector.detectMultiScale(gray, faces, 1.1, 5, 0,
+        faceDetector.detectMultiScale(gray, faces, 1.1, 4, 0,
             new Size(MIN_FACE_WIDTH, MIN_FACE_HEIGHT), new Size());
         gray.release();
         return faces;
     }
 
-    // ── Brightness ────────────────────────────────────────────
+    // ── Brightness helpers ────────────────────────────────────
 
-    public static double hitungBrightness(Mat mat) {
-        Mat gray = new Mat();
-        if (mat.channels() == 3)
-            Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
-        else
-            gray = mat.clone();
-        Scalar mean = Core.mean(gray);
-        gray.release();
-        return mean.val[0];
-    }
+    /**
+     * Hitung brightness rata-rata di region tertentu.
+     * Jika region = null → hitung seluruh gambar.
+     * Menggunakan channel grayscale untuk akurasi.
+     */
+    public static double hitungBrightnessRegion(Mat mat, Rect region) {
+        try {
+            Mat gray = new Mat();
+            if (mat.channels() == 3)
+                Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
+            else
+                gray = mat.clone();
 
-    public static double hitungBrightness(BufferedImage image) {
-        if (isAvailable()) {
-            Mat mat = bufferedImageToMat(image);
-            double b = hitungBrightness(mat);
-            mat.release();
+            Mat target;
+            if (region != null) {
+                // Clamp region agar tidak keluar batas
+                Rect r = clampRect(region, mat.cols(), mat.rows());
+                target = new Mat(gray, r);
+            } else {
+                target = gray;
+            }
+
+            Scalar mean = Core.mean(target);
+            double b    = mean.val[0];
+
+            if (region != null) target.release();
+            gray.release();
             return b;
+        } catch (Exception e) {
+            return 128; // fallback neutral
         }
-        return hitungBrightnessManual(image);
     }
 
     /**
-     * Hitung brightness tanpa OpenCV.
-     * Dipakai sebagai fallback — tetap memblokir foto gelap
-     * meski OpenCV tidak tersedia.
+     * Hitung brightness tanpa OpenCV (fallback manual).
+     * Menggunakan formula luminance standar.
      */
     public static double hitungBrightnessManual(BufferedImage image) {
+        if (image == null) return 0;
         long total = 0;
         int  count = 0;
-        int  step  = 3;
+        int  step  = 4;
         for (int y = 0; y < image.getHeight(); y += step) {
             for (int x = 0; x < image.getWidth(); x += step) {
                 int rgb = image.getRGB(x, y);
@@ -337,18 +397,35 @@ public class FaceDetectionUtil {
                 count++;
             }
         }
-        double brightness = count == 0 ? 0 : (double)total / count;
-        System.out.printf("[FaceDetection] Brightness manual: %.1f%n", brightness);
-        return brightness;
+        return count == 0 ? 0 : (double) total / count;
     }
+
+    public static double hitungBrightness(BufferedImage image) {
+        if (isAvailable()) {
+            Mat mat = bufferedImageToMat(image);
+            double b = hitungBrightnessRegion(mat, null);
+            mat.release();
+            return b;
+        }
+        return hitungBrightnessManual(image);
+    }
+
+    // ── Helper ───────────────────────────────────────────────
 
     private static String cekPosisi(Rect face, int fw, int fh) {
         double cx = face.x + face.width  / 2.0;
         double cy = face.y + face.height / 2.0;
-        double tx = fw * CENTER_TOLERANCE;
-        double ty = fh * CENTER_TOLERANCE;
-        if (Math.abs(cx - fw/2.0) > tx || Math.abs(cy - fh/2.0) > ty)
+        if (Math.abs(cx - fw/2.0) > fw * CENTER_TOLERANCE
+                || Math.abs(cy - fh/2.0) > fh * CENTER_TOLERANCE)
             return "Posisikan wajah di tengah kamera.";
         return null;
+    }
+
+    private static Rect clampRect(Rect r, int maxW, int maxH) {
+        int x = Math.max(0, r.x);
+        int y = Math.max(0, r.y);
+        int w = Math.min(r.width,  maxW - x);
+        int h = Math.min(r.height, maxH - y);
+        return new Rect(x, y, w, h);
     }
 }

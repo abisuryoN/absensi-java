@@ -3,21 +3,13 @@ package com.absensi.util;
 import java.awt.image.BufferedImage;
 
 /**
- * Validasi gambar sebelum disimpan/dipakai absensi.
+ * Wrapper validasi gambar.
  *
- * Aturan REGISTRASI (ketat):
- *  - Brightness >= 80
- *  - 1 wajah tepat
- *  - Wajah di tengah, tidak terpotong, ukuran cukup
- *
- * Aturan ABSENSI (ketat untuk brightness, longgar posisi):
- *  - Brightness >= 80 — FOTO GELAP SELALU DITOLAK
- *  - Wajah WAJIB ada minimal 1
- *  - Tidak boleh lebih dari 1 wajah
- *
- * Jika OpenCV tidak tersedia:
- *  - Brightness tetap dicek (manual)
- *  - Deteksi wajah dilewati
+ * Logika:
+ *  - Deteksi wajah DULU
+ *  - Brightness dicek HANYA di area wajah
+ *  - Foto terang tapi tanpa wajah = DITOLAK
+ *  - Foto sedikit gelap tapi wajah terdeteksi dan wajah cukup terang = DITERIMA
  */
 public class ImageValidationUtil {
 
@@ -34,25 +26,19 @@ public class ImageValidationUtil {
         }
     }
 
-    // ── Validasi REGISTRASI ───────────────────────────────────
-
     public static ValidationResult validateRegistrasi(BufferedImage image) {
         if (image == null)
             return new ValidationResult(false,
                 "Gagal mengambil gambar dari kamera.", null);
-
         FaceDetectionUtil.FaceDetectionResult r =
             FaceDetectionUtil.validate(image);
         return new ValidationResult(r.valid, r.errorMessage, r);
     }
 
-    // ── Validasi ABSENSI ─────────────────────────────────────
-
     public static ValidationResult validateAbsensi(BufferedImage image) {
         if (image == null)
             return new ValidationResult(false,
                 "Gagal mengambil gambar dari kamera.", null);
-
         FaceDetectionUtil.FaceDetectionResult r =
             FaceDetectionUtil.validateAbsensi(image);
         return new ValidationResult(r.valid, r.errorMessage, r);

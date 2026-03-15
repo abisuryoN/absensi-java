@@ -198,15 +198,58 @@ public class WebcamCaptureDialog extends JDialog {
     // ── Ambil foto ────────────────────────────────────────────
 
     private void capturePhoto(JPanel cardPanel) {
-        if (webcam == null || !webcam.isOpen()) return;
-
-        capturedImage = webcam.getImage();
-        if (capturedImage == null) {
+        // Cek webcam tersedia
+        if (webcam == null) {
             JOptionPane.showMessageDialog(this,
-                "Gagal mengambil foto. Coba lagi.", "Error",
+                "Kamera tidak tersedia.", "Error",
                 JOptionPane.ERROR_MESSAGE);
             return;
         }
+
+        // Disable tombol sementara agar tidak double-click
+        btnCapture.setEnabled(false);
+        btnCapture.setText("Mengambil...");
+
+        // Ambil gambar di background thread agar tidak freeze UI
+        new Thread(() -> {
+            try {
+                // Buka webcam jika belum terbuka
+                if (!webcam.isOpen()) {
+                    webcam.open();
+                }
+
+                final BufferedImage raw = webcam.getImage();
+
+                SwingUtilities.invokeLater(() -> {
+                    btnCapture.setEnabled(true);
+                    btnCapture.setText("Ambil Foto");
+
+                    if (raw == null) {
+                        JOptionPane.showMessageDialog(WebcamCaptureDialog.this,
+                            "Gagal mengambil foto. Coba lagi.", "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                    prosesGambar(raw, cardPanel);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    btnCapture.setEnabled(true);
+                    btnCapture.setText("Ambil Foto");
+                    JOptionPane.showMessageDialog(WebcamCaptureDialog.this,
+                        "Error kamera: " + ex.getMessage(), "Error",
+                        JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        }).start();
+    }
+
+    private void prosesGambar(BufferedImage raw, JPanel cardPanel) {
+
+        // Simpan gambar langsung dari webcam tanpa flip
+        // webcam.getImage() sudah return orientasi normal (tidak mirror)
+        // setMirrored(true) hanya untuk tampilan preview, tidak mempengaruhi getImage()
+        capturedImage = toStandardRGB(raw);
 
         // Gambar kotak wajah di preview
         BufferedImage preview = gambarFaceBox(capturedImage);
@@ -218,11 +261,10 @@ public class WebcamCaptureDialog extends JDialog {
         btnCapture.setVisible(false);
         btnRetake.setVisible(true);
         btnConfirm.setVisible(true);
-        btnConfirm.setEnabled(false); // disable dulu, tunggu validasi
+        btnConfirm.setEnabled(false);
 
         capturedImageBytes = imageToBytes(capturedImage);
 
-        // Validasi di background
         lblValidasi.setForeground(new Color(0xFF, 0xC1, 0x07));
         lblValidasi.setText("Memeriksa foto...");
         jalankanValidasi();
@@ -254,7 +296,7 @@ public class WebcamCaptureDialog extends JDialog {
                         String detail = "";
                         if (r.faceResult != null) {
                             detail = String.format(
-                                " | Wajah: %d | Cahaya: %.0f/255",
+                                " | Wajah: %d | Cahaya wajah: %.0f/255",
                                 r.faceResult.faceCount,
                                 r.faceResult.brightness);
                         }
@@ -417,6 +459,32 @@ public class WebcamCaptureDialog extends JDialog {
             System.err.println("[WebcamDialog] Convert error: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Flip gambar secara horizontal (mirror).
+     * Dipakai untuk membalik foto yang mirror dari webcam
+     * sehingga foto yang disimpan = orientasi normal (tidak terbalik).
+     */
+    /**
+     * Konversi BufferedImage ke TYPE_INT_RGB standard.
+     * Webcam library (Sarxos) kadang return TYPE_CUSTOM (0)
+     * yang bisa menyebabkan error di method lain.
+     * Method ini TIDAK melakukan flip — orientasi dipertahankan.
+     */
+    private BufferedImage toStandardRGB(BufferedImage src) {
+        if (src == null) return null;
+        int w = src.getWidth(), h = src.getHeight();
+
+        // Jika sudah TYPE_INT_RGB atau TYPE_3BYTE_BGR, langsung return
+        // (tapi tetap konversi ke INT_RGB untuk konsistensi)
+        BufferedImage dst = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = dst.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+            java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(src, 0, 0, w, h, null);
+        g.dispose();
+        return dst;
     }
 
     private JButton buatBtn(String text, Color bg, Color fg) {
