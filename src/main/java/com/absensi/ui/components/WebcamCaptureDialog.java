@@ -12,41 +12,30 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-/**
- * Dialog kamera untuk mengambil foto selfie.
- *
- * Perbaikan:
- *  - Foto gelap SELALU ditolak (brightness < 80)
- *  - Untuk registrasi: wajah harus jelas, di tengah, tidak terpotong
- *  - Untuk absensi: wajah harus terdeteksi, tidak gelap
- *  - Tombol "Gunakan Foto" disable jika foto tidak valid (mode registrasi)
- *  - Feedback realtime warna hijau/merah di bawah foto
- */
 public class WebcamCaptureDialog extends JDialog {
 
     private final boolean isRegistrasi;
 
-    private Webcam       webcam;
-    private WebcamPanel  webcamPanel;
-    private JButton      btnCapture;
-    private JButton      btnRetake;
-    private JButton      btnConfirm;
-    private JLabel       lblPreview;
-    private JLabel       lblValidasi;  // feedback brightness + wajah
-    private JPanel       pnlCamera;
-    private JPanel       pnlPreview;
+    private Webcam        webcam;
+    private WebcamPanel   webcamPanel;
+    private JButton       btnCapture;
+    private JButton       btnRetake;
+    private JButton       btnConfirm;
+    private JLabel        lblPreview;
+    private JLabel        lblValidasi;
+    private JPanel        pnlCamera;
+    private JPanel        pnlPreview;
 
     private BufferedImage capturedImage;
     private byte[]        capturedImageBytes;
-    private boolean       confirmed    = false;
-    private boolean       fotoValid    = false;
+    private boolean       confirmed = false;
+    private boolean       fotoValid = false;
 
     public WebcamCaptureDialog(Frame parent, String title) {
         this(parent, title, false);
     }
 
-    public WebcamCaptureDialog(Frame parent, String title,
-                                boolean isRegistrasi) {
+    public WebcamCaptureDialog(Frame parent, String title, boolean isRegistrasi) {
         super(parent, title, true);
         this.isRegistrasi = isRegistrasi;
         initComponents();
@@ -62,12 +51,11 @@ public class WebcamCaptureDialog extends JDialog {
         setLayout(new BorderLayout(8, 8));
         getContentPane().setBackground(new Color(0x1B2A4A));
 
-        // Header
         JPanel topPanel = new JPanel(new BorderLayout(0, 2));
         topPanel.setBackground(new Color(0x1B2A4A));
 
-        JLabel lblTitle = new JLabel(isRegistrasi
-            ? "Foto Selfie Registrasi" : getTitle(),
+        JLabel lblTitle = new JLabel(
+            isRegistrasi ? "Foto Selfie Registrasi" : getTitle(),
             SwingConstants.CENTER);
         lblTitle.setFont(new Font("Segoe UI", Font.BOLD, 16));
         lblTitle.setForeground(Color.WHITE);
@@ -76,8 +64,8 @@ public class WebcamCaptureDialog extends JDialog {
 
         if (isRegistrasi) {
             JLabel petunjuk = new JLabel(
-                "<html><center>Wajah harus jelas • Pencahayaan cukup • " +
-                "Wajah di tengah • Tidak terpotong</center></html>",
+                "<html><center>Wajah harus jelas • Tidak ada yang menutupi • " +
+                "Pencahayaan cukup • Wajah di tengah</center></html>",
                 SwingConstants.CENTER);
             petunjuk.setFont(new Font("Segoe UI", Font.PLAIN, 11));
             petunjuk.setForeground(new Color(0x00, 0xC9, 0xA7));
@@ -86,13 +74,11 @@ public class WebcamCaptureDialog extends JDialog {
         }
         add(topPanel, BorderLayout.NORTH);
 
-        // Panel kamera
         pnlCamera = new JPanel(new BorderLayout());
         pnlCamera.setBackground(Color.BLACK);
         pnlCamera.setPreferredSize(new Dimension(640, 480));
         pnlCamera.setBorder(BorderFactory.createEmptyBorder(5, 15, 5, 15));
 
-        // Panel preview
         pnlPreview = new JPanel(new BorderLayout());
         pnlPreview.setBackground(new Color(0x1B2A4A));
         pnlPreview.setBorder(BorderFactory.createEmptyBorder(5, 15, 5, 15));
@@ -106,7 +92,6 @@ public class WebcamCaptureDialog extends JDialog {
         center.add(pnlPreview, "preview");
         add(center, BorderLayout.CENTER);
 
-        // Label validasi + tombol
         JPanel south = new JPanel(new BorderLayout(0, 4));
         south.setBackground(new Color(0x1B2A4A));
         south.setBorder(BorderFactory.createEmptyBorder(4, 0, 14, 0));
@@ -135,20 +120,14 @@ public class WebcamCaptureDialog extends JDialog {
         south.add(pnlBtn, BorderLayout.CENTER);
         add(south, BorderLayout.SOUTH);
 
-        // Events
         btnCapture.addActionListener(e -> capturePhoto(center));
         btnRetake.addActionListener(e  -> retakePhoto(center));
         btnConfirm.addActionListener(e -> doConfirm());
-        btnCancel.addActionListener(e  -> {
-            confirmed = false;
-            stopWebcam();
-            dispose();
-        });
+        btnCancel.addActionListener(e  -> { confirmed = false; stopWebcam(); dispose(); });
 
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosing(java.awt.event.WindowEvent e) {
-                confirmed = false;
-                stopWebcam();
+                confirmed = false; stopWebcam();
             }
         });
     }
@@ -162,7 +141,7 @@ public class WebcamCaptureDialog extends JDialog {
                     webcamPanel = new WebcamPanel(webcam);
                     webcamPanel.setFPSDisplayed(false);
                     webcamPanel.setDisplayDebugInfo(false);
-                    webcamPanel.setMirrored(true);
+                    webcamPanel.setMirrored(true); // preview mirror (natural selfie)
                     SwingUtilities.invokeLater(() -> {
                         pnlCamera.add(webcamPanel, BorderLayout.CENTER);
                         pnlCamera.revalidate();
@@ -177,16 +156,14 @@ public class WebcamCaptureDialog extends JDialog {
                         lbl.setForeground(Color.WHITE);
                         pnlCamera.add(lbl, BorderLayout.CENTER);
                         btnCapture.setText("Pilih Foto dari File");
-                        btnCapture.removeActionListener(
-                            btnCapture.getActionListeners()[0]);
+                        btnCapture.removeActionListener(btnCapture.getActionListeners()[0]);
                         btnCapture.addActionListener(ev -> pickFromFile());
                     });
                 }
             } catch (Exception e) {
                 System.err.println("[WebcamDialog] Error: " + e.getMessage());
                 SwingUtilities.invokeLater(() -> {
-                    JLabel lbl = new JLabel(
-                        "Gagal membuka kamera: " + e.getMessage(),
+                    JLabel lbl = new JLabel("Gagal membuka kamera: " + e.getMessage(),
                         SwingConstants.CENTER);
                     lbl.setForeground(Color.RED);
                     pnlCamera.add(lbl, BorderLayout.CENTER);
@@ -195,35 +172,24 @@ public class WebcamCaptureDialog extends JDialog {
         }).start();
     }
 
-    // ── Ambil foto ────────────────────────────────────────────
+    // ── Capture ───────────────────────────────────────────────
 
     private void capturePhoto(JPanel cardPanel) {
-        // Cek webcam tersedia
         if (webcam == null) {
-            JOptionPane.showMessageDialog(this,
-                "Kamera tidak tersedia.", "Error",
+            JOptionPane.showMessageDialog(this, "Kamera tidak tersedia.", "Error",
                 JOptionPane.ERROR_MESSAGE);
             return;
         }
-
-        // Disable tombol sementara agar tidak double-click
         btnCapture.setEnabled(false);
         btnCapture.setText("Mengambil...");
 
-        // Ambil gambar di background thread agar tidak freeze UI
         new Thread(() -> {
             try {
-                // Buka webcam jika belum terbuka
-                if (!webcam.isOpen()) {
-                    webcam.open();
-                }
-
+                if (!webcam.isOpen()) webcam.open();
                 final BufferedImage raw = webcam.getImage();
-
                 SwingUtilities.invokeLater(() -> {
                     btnCapture.setEnabled(true);
                     btnCapture.setText("Ambil Foto");
-
                     if (raw == null) {
                         JOptionPane.showMessageDialog(WebcamCaptureDialog.this,
                             "Gagal mengambil foto. Coba lagi.", "Error",
@@ -245,13 +211,11 @@ public class WebcamCaptureDialog extends JDialog {
     }
 
     private void prosesGambar(BufferedImage raw, JPanel cardPanel) {
-
-        // Simpan gambar langsung dari webcam tanpa flip
-        // webcam.getImage() sudah return orientasi normal (tidak mirror)
-        // setMirrored(true) hanya untuk tampilan preview, tidak mempengaruhi getImage()
+        // Konversi ke TYPE_INT_RGB (webcam kadang return TYPE_CUSTOM=0)
+        // Tidak ada flip — webcam driver Windows sudah output normal
         capturedImage = toStandardRGB(raw);
 
-        // Gambar kotak wajah di preview
+        // Tampilkan kotak wajah di preview
         BufferedImage preview = gambarFaceBox(capturedImage);
         lblPreview.setIcon(new ImageIcon(
             preview.getScaledInstance(640, 480, Image.SCALE_SMOOTH)));
@@ -261,19 +225,14 @@ public class WebcamCaptureDialog extends JDialog {
         btnCapture.setVisible(false);
         btnRetake.setVisible(true);
         btnConfirm.setVisible(true);
-        btnConfirm.setEnabled(false);
+        btnConfirm.setEnabled(false); // disable sampai validasi selesai
 
         capturedImageBytes = imageToBytes(capturedImage);
-
         lblValidasi.setForeground(new Color(0xFF, 0xC1, 0x07));
         lblValidasi.setText("Memeriksa foto...");
         jalankanValidasi();
     }
 
-    /**
-     * Validasi foto di background thread.
-     * Selalu cek brightness dulu — foto gelap langsung DITOLAK.
-     */
     private void jalankanValidasi() {
         if (capturedImage == null) return;
 
@@ -284,42 +243,26 @@ public class WebcamCaptureDialog extends JDialog {
                     ? ImageValidationUtil.validateRegistrasi(capturedImage)
                     : ImageValidationUtil.validateAbsensi(capturedImage);
             }
-
             @Override
             protected void done() {
                 try {
                     ImageValidationUtil.ValidationResult r = get();
                     fotoValid = r.valid;
-
                     if (r.valid) {
                         lblValidasi.setForeground(new Color(0x28, 0xA7, 0x45));
                         String detail = "";
                         if (r.faceResult != null) {
-                            detail = String.format(
-                                " | Wajah: %d | Cahaya wajah: %.0f/255",
-                                r.faceResult.faceCount,
-                                r.faceResult.brightness);
+                            detail = String.format(" | Wajah: %d | Cahaya wajah: %.0f/255",
+                                r.faceResult.faceCount, r.faceResult.brightness);
                         }
                         lblValidasi.setText("Foto valid" + detail);
                         btnConfirm.setEnabled(true);
-
                     } else {
                         lblValidasi.setForeground(new Color(0xDC, 0x35, 0x45));
-                        // Tampilkan baris pertama pesan error
                         String msg = r.message != null
-                            ? r.message.split("\n")[0]
-                            : "Foto tidak valid";
+                            ? r.message.split("\n")[0] : "Foto tidak valid";
                         lblValidasi.setText(msg);
-
-                        // Mode registrasi: disable tombol — wajib foto ulang
-                        // Mode absensi: boleh tetap lanjut tapi dengan warning
-                        if (isRegistrasi) {
-                            btnConfirm.setEnabled(false);
-                        } else {
-                            // Untuk absensi, TETAP disable jika gelap atau
-                            // tidak ada wajah — harus foto ulang
-                            btnConfirm.setEnabled(false);
-                        }
+                        btnConfirm.setEnabled(false); // wajib foto ulang
                     }
                 } catch (Exception e) {
                     lblValidasi.setText(" ");
@@ -336,20 +279,14 @@ public class WebcamCaptureDialog extends JDialog {
         lblPreview.setIcon(null);
         lblValidasi.setText(" ");
         btnConfirm.setEnabled(false);
-
         ((CardLayout) cardPanel.getLayout()).show(cardPanel, "camera");
         btnCapture.setVisible(true);
         btnRetake.setVisible(false);
         btnConfirm.setVisible(false);
     }
 
-    /**
-     * Konfirmasi foto — validasi final sebelum tutup dialog.
-     * Jalankan validasi ulang untuk memastikan tidak ada bypass.
-     */
     private void doConfirm() {
         if (capturedImageBytes == null) return;
-
         btnConfirm.setEnabled(false);
         btnConfirm.setText("Memvalidasi...");
 
@@ -360,7 +297,6 @@ public class WebcamCaptureDialog extends JDialog {
                     ? ImageValidationUtil.validateRegistrasi(capturedImage)
                     : ImageValidationUtil.validateAbsensi(capturedImage);
             }
-
             @Override
             protected void done() {
                 btnConfirm.setText("Gunakan Foto");
@@ -368,21 +304,15 @@ public class WebcamCaptureDialog extends JDialog {
                 try {
                     ImageValidationUtil.ValidationResult r = get();
                     if (!r.valid) {
-                        JOptionPane.showMessageDialog(
-                            WebcamCaptureDialog.this,
-                            r.message,
-                            "Foto Tidak Valid",
-                            JOptionPane.WARNING_MESSAGE);
-                        // Paksa foto ulang
+                        JOptionPane.showMessageDialog(WebcamCaptureDialog.this,
+                            r.message, "Foto Tidak Valid", JOptionPane.WARNING_MESSAGE);
                         btnRetake.doClick();
                         return;
                     }
-                    // Valid — tutup dialog
                     confirmed = true;
                     stopWebcam();
                     dispose();
                 } catch (Exception e) {
-                    // Error saat validasi — izinkan lanjut
                     confirmed = true;
                     stopWebcam();
                     dispose();
@@ -391,20 +321,19 @@ public class WebcamCaptureDialog extends JDialog {
         }.execute();
     }
 
-    // ── Gambar kotak wajah ────────────────────────────────────
+    // ── Gambar kotak wajah di preview ─────────────────────────
 
     private BufferedImage gambarFaceBox(BufferedImage image) {
         if (!FaceDetectionUtil.isAvailable() || image == null) return image;
         try {
-            org.opencv.core.Mat mat   = FaceDetectionUtil.bufferedImageToMat(image);
+            org.opencv.core.Mat mat = FaceDetectionUtil.bufferedImageToMat(image);
             org.opencv.core.MatOfRect faces = FaceDetectionUtil.detectFaces(mat);
-            org.opencv.core.Rect[]    arr   = faces.toArray();
+            org.opencv.core.Rect[] arr = faces.toArray();
             mat.release();
             if (arr.length == 0) return image;
 
             BufferedImage out = new BufferedImage(
-                image.getWidth(), image.getHeight(),
-                BufferedImage.TYPE_INT_RGB);
+                image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
             Graphics2D g2 = out.createGraphics();
             g2.drawImage(image, 0, 0, null);
             g2.setColor(new Color(0x00, 0xC9, 0xA7));
@@ -412,6 +341,7 @@ public class WebcamCaptureDialog extends JDialog {
             for (org.opencv.core.Rect r : arr)
                 g2.drawRect(r.x, r.y, r.width, r.height);
             g2.setFont(new Font("Segoe UI", Font.BOLD, 14));
+            g2.setColor(new Color(0x00, 0xC9, 0xA7));
             g2.drawString(arr.length + " wajah", 10, 24);
             g2.dispose();
             return out;
@@ -420,7 +350,7 @@ public class WebcamCaptureDialog extends JDialog {
         }
     }
 
-    // ── Pilih foto dari file ──────────────────────────────────
+    // ── Pilih dari file ───────────────────────────────────────
 
     private void pickFromFile() {
         JFileChooser fc = new JFileChooser();
@@ -432,8 +362,7 @@ public class WebcamCaptureDialog extends JDialog {
                 if (capturedImage != null) {
                     capturedImageBytes = imageToBytes(capturedImage);
                     lblPreview.setIcon(new ImageIcon(
-                        capturedImage.getScaledInstance(
-                            400, 300, Image.SCALE_SMOOTH)));
+                        capturedImage.getScaledInstance(400, 300, Image.SCALE_SMOOTH)));
                     btnRetake.setVisible(true);
                     btnConfirm.setVisible(true);
                     btnConfirm.setEnabled(false);
@@ -442,14 +371,30 @@ public class WebcamCaptureDialog extends JDialog {
                     jalankanValidasi();
                 }
             } catch (IOException e) {
-                JOptionPane.showMessageDialog(this,
-                    "Gagal memuat foto: " + e.getMessage(),
+                JOptionPane.showMessageDialog(this, "Gagal memuat foto: " + e.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
 
-    // ── Helper ───────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────
+
+    /**
+     * Konversi ke TYPE_INT_RGB.
+     * Sarxos webcam kadang return TYPE_CUSTOM (0) yang menyebabkan error.
+     * Tidak ada flip — driver Windows sudah output normal.
+     */
+    private BufferedImage toStandardRGB(BufferedImage src) {
+        if (src == null) return null;
+        int w = src.getWidth(), h = src.getHeight();
+        BufferedImage dst = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = dst.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+            RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(src, 0, 0, w, h, null);
+        g.dispose();
+        return dst;
+    }
 
     private byte[] imageToBytes(BufferedImage image) {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
@@ -459,32 +404,6 @@ public class WebcamCaptureDialog extends JDialog {
             System.err.println("[WebcamDialog] Convert error: " + e.getMessage());
             return null;
         }
-    }
-
-    /**
-     * Flip gambar secara horizontal (mirror).
-     * Dipakai untuk membalik foto yang mirror dari webcam
-     * sehingga foto yang disimpan = orientasi normal (tidak terbalik).
-     */
-    /**
-     * Konversi BufferedImage ke TYPE_INT_RGB standard.
-     * Webcam library (Sarxos) kadang return TYPE_CUSTOM (0)
-     * yang bisa menyebabkan error di method lain.
-     * Method ini TIDAK melakukan flip — orientasi dipertahankan.
-     */
-    private BufferedImage toStandardRGB(BufferedImage src) {
-        if (src == null) return null;
-        int w = src.getWidth(), h = src.getHeight();
-
-        // Jika sudah TYPE_INT_RGB atau TYPE_3BYTE_BGR, langsung return
-        // (tapi tetap konversi ke INT_RGB untuk konsistensi)
-        BufferedImage dst = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        java.awt.Graphics2D g = dst.createGraphics();
-        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
-            java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(src, 0, 0, w, h, null);
-        g.dispose();
-        return dst;
     }
 
     private JButton buatBtn(String text, Color bg, Color fg) {
@@ -505,7 +424,6 @@ public class WebcamCaptureDialog extends JDialog {
     }
 
     // ── Public API ────────────────────────────────────────────
-
     public boolean       isConfirmed()          { return confirmed; }
     public byte[]        getCapturedImageBytes() { return capturedImageBytes; }
     public BufferedImage getCapturedImage()      { return capturedImage; }
